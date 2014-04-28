@@ -13,6 +13,7 @@ import (
 	"math/rand"
 	"net/http"
 	"path/filepath"
+    "strconv"
 	"sync"
 	"time"
 )
@@ -160,9 +161,9 @@ func (s *Server) joinHandler(w http.ResponseWriter, req *http.Request) {
 }
 
 func (s *Server) readHandler(w http.ResponseWriter, req *http.Request) {
-	vars := mux.Vars(req)
-	value := s.db.Get()
-	w.Write([]byte(value))
+	//vars := mux.Vars(req)
+	gameState := s.db.Get()
+    fmt.Fprintf(w, "Game state: %v", gameState)
 }
 
 func (s *Server) writeHandler(w http.ResponseWriter, req *http.Request) {
@@ -174,11 +175,19 @@ func (s *Server) writeHandler(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	value := int(b)
+    //TODO: fix this jankiness
+	value, err := strconv.ParseInt(string(b), 10, 0)
+    if err != nil { //TODO: make more informative error
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
 
 	// Execute the command against the Raft server.
-	_, err = s.raftServer.Do(command.NewWriteCommand(int(vars["playerId"]),
-        vars["resource"], value))
+    pid, err := strconv.ParseInt(vars["playerId"], 10, 0)
+    if err != nil { //TODO: make more informative error
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
+	_, err = s.raftServer.Do(command.NewWriteCommand(int(pid),
+        vars["resource"], int(value)))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
@@ -188,7 +197,11 @@ func (s *Server) addPlayerHandler(w http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
 
     //TODOs: check if player already exists, etc.
-    _, err = s.raftServer.Do(command.NewPlayerCommand(int(vars["playerId"]))
+    pid, err := strconv.ParseInt(vars["playerId"], 10, 0)
+    if err != nil { //TODO: make more informative error
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
+    _, err = s.raftServer.Do(command.NewPlayerCommand(int(pid), "add"))
     if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}

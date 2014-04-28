@@ -1,3 +1,5 @@
+package player
+
 const startingResources = 2
 
 var resources = []string{"flax", "hay", "oats", "rye", "corn", "barley",
@@ -16,19 +18,19 @@ var resources = []string{"flax", "hay", "oats", "rye", "corn", "barley",
 //)
 
 type Player struct {
-    //cards map[Resource]int
-    cards   map[string]int
+    //TODO: Un-export field
+    Cards   map[string]int
     id      int
 }
 
 // Creates a new player.
 func New(newId int) *Player {
-    var defaultCards = map[string]int
-    for resource := range resources {
+    var defaultCards = make(map[string]int)
+    for _, resource := range resources {
         defaultCards[resource] = startingResources
     }
     return &Player{
-        cards:  defaultCards,
-        id:     newId
+        Cards:  defaultCards,
+        id:     newId,
     }
 }

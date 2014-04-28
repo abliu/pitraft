@@ -1,7 +1,8 @@
 package command
 
 import (
-	"github.com/abliu/pitraft"
+    "github.com/goraft/raft"
+	//"github.com/abliu/pitraft"
 	"github.com/abliu/pitraft/db"
 )
 
@@ -28,11 +29,11 @@ func (c *PlayerCommand) CommandName() string {
 func (c *PlayerCommand) Apply(server raft.Server) (interface{}, error) {
     // TODO: Check for errors (e.g. player already exists)
 	db := server.Context().(*db.DB)
-    switch c.action {
+    switch c.Action {
         case "add":
-            db.AddPlayer(c.playerId)
+            db.AddPlayer(c.Player)
         case "remove":
-            db.RemovePlayer(c.PlayerId)
+            db.RemovePlayer(c.Player)
         default:
             // DO SOMETHING
     }

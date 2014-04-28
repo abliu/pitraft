@@ -1,7 +1,7 @@
 package command
 
 import (
-	"github.com/abliu/pitraft"
+    "github.com/goraft/raft"
 	"github.com/abliu/pitraft/db"
 )
 
