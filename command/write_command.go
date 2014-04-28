@@ -1,21 +1,23 @@
 package command
 
 import (
-	"github.com/goraft/raft"
-	"github.com/goraft/raftd/db"
+	"github.com/abliu/pitraft"
+	"github.com/abliu/pitraft/db"
 )
 
 // This command writes a value to a key.
 type WriteCommand struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
+	Player      int     `json:"player"`
+	Resource    string  `json:"resource"`
+    Amount      int     `json:"amount"`
 }
 
 // Creates a new write command.
-func NewWriteCommand(key string, value string) *WriteCommand {
+func NewWriteCommand(playerId int, resource string, amount int) *WriteCommand {
 	return &WriteCommand{
-		Key:   key,
-		Value: value,
+		Player:     playerId,
+		Resource:   resource,
+        Amount:     amount,
 	}
 }
 
@@ -27,6 +29,6 @@ func (c *WriteCommand) CommandName() string {
 // Writes a value to a key.
 func (c *WriteCommand) Apply(server raft.Server) (interface{}, error) {
 	db := server.Context().(*db.DB)
-	db.Put(c.Key, c.Value)
+	db.Put(c.Player, c.Resource, c.Amount)
 	return nil, nil
 }
