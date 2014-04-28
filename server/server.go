@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/goraft/raft"
-	"github.com/goraft/raftd/command"
-	"github.com/goraft/raftd/db"
+	"github.com/abliu/pitraft/command"
+	"github.com/abliu/pitraft/db"
 	"github.com/gorilla/mux"
 	"io/ioutil"
 	"log"
@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-// The raftd server is a combination of the Raft server and an HTTP
+// The pitraft server is a combination of the Raft server and an HTTP
 // server which acts as the transport.
 type Server struct {
 	name       string
@@ -111,8 +111,10 @@ func (s *Server) ListenAndServe(leader string) error {
 		Handler: s.router,
 	}
 
-	s.router.HandleFunc("/db/{key}", s.readHandler).Methods("GET")
-	s.router.HandleFunc("/db/{key}", s.writeHandler).Methods("POST")
+	s.router.HandleFunc("/gameState/", s.readHandler).Methods("GET")
+	s.router.HandleFunc("/write/{playerId}/{resource}", s.writeHandler).Methods("POST")
+    s.router.HandleFunc("/addPlayer/{playerId}",
+        s.addPlayerHandler).Methods("GET")
 	s.router.HandleFunc("/join", s.joinHandler).Methods("POST")
 
 	log.Println("Listening at:", s.connectionString())
@@ -159,24 +161,35 @@ func (s *Server) joinHandler(w http.ResponseWriter, req *http.Request) {
 
 func (s *Server) readHandler(w http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
-	value := s.db.Get(vars["key"])
+	value := s.db.Get()
 	w.Write([]byte(value))
 }
 
 func (s *Server) writeHandler(w http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
 
-	// Read the value from the POST body.
+	// Read the new resource value from the POST body.
 	b, err := ioutil.ReadAll(req.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	value := string(b)
+	value := int(b)
 
 	// Execute the command against the Raft server.
-	_, err = s.raftServer.Do(command.NewWriteCommand(vars["key"], value))
+	_, err = s.raftServer.Do(command.NewWriteCommand(int(vars["playerId"]),
+        vars["resource"], value))
 	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
+}
+
+func (s *Server) addPlayerHandler(w http.ResponseWriter, req *http.Request) {
+	vars := mux.Vars(req)
+
+    //TODOs: check if player already exists, etc.
+    _, err = s.raftServer.Do(command.NewPlayerCommand(int(vars["playerId"]))
+    if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
 }
