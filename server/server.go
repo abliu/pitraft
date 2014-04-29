@@ -187,7 +187,9 @@ func (s *Server) readPlayerHandler(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
 	gameState := s.db.Get()
-    fmt.Fprintf(w, "%v", gameState[int(pid)])
+    gameStateForPlayer := gameState[int(pid)].Cards
+    msg, err := json.Marshal(gameStateForPlayer)
+    w.Write([]byte(msg))
 }
 
 func (s *Server) readHandler(w http.ResponseWriter, req *http.Request) {
