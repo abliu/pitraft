@@ -281,6 +281,7 @@ func (s *Server) propTradeHandler(w http.ResponseWriter, req *http.Request) {
     }
 
     msg, _ := json.Marshal(tradeId)
+    log.Printf("tradeid: %d", tradeId)
     w.Write([]byte(msg))
 }
 
