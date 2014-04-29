@@ -50,6 +50,7 @@ func main() {
 
 	// Setup commands.
 	raft.RegisterCommand(&command.WriteCommand{})
+    raft.RegisterCommand(&command.PlayerCommand{})
 
 	// Set the data directory.
 	if flag.NArg() == 0 {

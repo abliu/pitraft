@@ -27,15 +27,13 @@ func (c *PlayerCommand) CommandName() string {
 
 // Writes a value to a key.
 func (c *PlayerCommand) Apply(server raft.Server) (interface{}, error) {
-    // TODO: Check for errors (e.g. player already exists)
+    // TODO: Check for errors (e.g. player already exists, other c.Action)
 	db := server.Context().(*db.DB)
     switch c.Action {
         case "add":
             db.AddPlayer(c.Player)
         case "remove":
             db.RemovePlayer(c.Player)
-        default:
-            // DO SOMETHING
     }
 	return nil, nil
 }

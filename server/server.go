@@ -112,10 +112,9 @@ func (s *Server) ListenAndServe(leader string) error {
 		Handler: s.router,
 	}
 
-	s.router.HandleFunc("/gameState/", s.readHandler).Methods("GET")
+	s.router.HandleFunc("/gameState", s.readHandler).Methods("GET")
 	s.router.HandleFunc("/write/{playerId}/{resource}", s.writeHandler).Methods("POST")
-    s.router.HandleFunc("/addPlayer/{playerId}",
-        s.addPlayerHandler).Methods("GET")
+    s.router.HandleFunc("/addPlayer/{playerId}", s.addPlayerHandler).Methods("GET")
 	s.router.HandleFunc("/join", s.joinHandler).Methods("POST")
 
 	log.Println("Listening at:", s.connectionString())
