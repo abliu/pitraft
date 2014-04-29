@@ -271,13 +271,17 @@ func (s *Server) propTradeHandler(w http.ResponseWriter, req *http.Request) {
 	}
     // Check if player has appropriate resources
     //TODO: Better error handling here if not enough resources
+    tradeId := rand.Int()
     if s.db.GetPlayer(int(pid))[vars["resource"]] >= int(amount) {
         _, err = s.raftServer.Do(command.NewAddTradeCommand(int(pid),
-            vars["resource"], int(amount)))
+            vars["resource"], int(amount), tradeId))
         if err != nil {
             http.Error(w, err.Error(), http.StatusBadRequest)
         }
     }
+
+    msg, _ := json.Marshal(tradeId)
+    w.Write([]byte(msg))
 }
 
 func (s *Server) addPlayerHandler(w http.ResponseWriter, req *http.Request) {

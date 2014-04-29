@@ -12,7 +12,6 @@ type Trade struct {
 
 type TradeDB struct {
 	trades  map[int](*Trade) 
-    counter int
 	mutex   sync.RWMutex
 }
 
@@ -20,7 +19,6 @@ type TradeDB struct {
 func New() *TradeDB {
 	return &TradeDB{
 		trades:  make(map[int](*Trade)),
-        counter: 0,
 	}
 }
 
@@ -39,12 +37,11 @@ func (db *TradeDB) GetTrade(id int) *Trade {
 }
 
 // Adds a trade.
-func (db *TradeDB) Add(player int, resource string, amount int) {
+func (db *TradeDB) Add(player int, resource string, amount int, tradeId int) {
 	db.mutex.Lock()
 	defer db.mutex.Unlock()
     //TODO: check errors here
-    db.counter++
-    db.trades[db.counter] = &Trade{
+    db.trades[tradeId] = &Trade{
         Player:     player,
         Resource:   resource,
         Amount:     amount,

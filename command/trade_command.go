@@ -10,14 +10,16 @@ type AddTradeCommand struct {
 	Player      int     `json:"player"`
 	Resource    string  `json:"resource"`
     Amount      int     `json:"amount"`
+    TradeId     int     `json:"tradeId"`
 }
 
 // Creates a new write command.
-func NewAddTradeCommand(playerId int, resource string, amount int) *AddTradeCommand {
+func NewAddTradeCommand(playerId int, resource string, amount int, tradeId int) *AddTradeCommand {
 	return &AddTradeCommand{
 		Player:     playerId,
         Resource:   resource,
         Amount:     amount,
+        TradeId:    tradeId,
 	}
 }
 
@@ -31,6 +33,6 @@ func (c *AddTradeCommand) Apply(server raft.Server) (interface{}, error) {
     // TODO: Check for errors (e.g. player already exists, other c.Action)
 	pairdb := server.Context().(*db.PairDB)
     db := pairdb.TradeDB
-    db.Add(c.Player, c.Resource, c.Amount)
+    db.Add(c.Player, c.Resource, c.Amount, c.TradeId)
 	return nil, nil
 }
