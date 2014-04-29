@@ -3,6 +3,7 @@ package db
 import (
 	"sync"
     "github.com/abliu/pitraft/player"
+    "github.com/abliu/pitraft/tradedb"
 )
 
 // The key-value database.
@@ -23,6 +24,18 @@ func (db *DB) Get() map[int](*player.Player) {
 	db.mutex.RLock()
 	defer db.mutex.RUnlock()
 	return db.gameState
+}
+
+func (db *DB) GetPlayer(playerId int) map[string]int {
+	db.mutex.RLock()
+	defer db.mutex.RUnlock()
+	return db.gameState[playerId].Cards
+}
+
+func (db *DB) GetPlayerResource(playerId int, resource string) int {
+	db.mutex.RLock()
+	defer db.mutex.RUnlock()
+	return db.gameState[playerId].Cards[resource]
 }
 
 // Sets the value for a given key.
@@ -46,3 +59,9 @@ func (db *DB) RemovePlayer(id int) {
     defer db.mutex.Unlock()
     delete(db.gameState, id)
 }
+
+type PairDB struct {
+    DB      *DB
+    TradeDB *tradedb.TradeDB
+}
+

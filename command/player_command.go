@@ -2,7 +2,6 @@ package command
 
 import (
     "github.com/goraft/raft"
-	//"github.com/abliu/pitraft"
 	"github.com/abliu/pitraft/db"
 )
 
@@ -28,7 +27,8 @@ func (c *PlayerCommand) CommandName() string {
 // Writes a value to a key.
 func (c *PlayerCommand) Apply(server raft.Server) (interface{}, error) {
     // TODO: Check for errors (e.g. player already exists, other c.Action)
-	db := server.Context().(*db.DB)
+	pairdb := server.Context().(*db.PairDB)
+    db := pairdb.DB
     switch c.Action {
         case "add":
             db.AddPlayer(c.Player)

@@ -7,6 +7,7 @@ import (
 	"github.com/goraft/raft"
 	"github.com/abliu/pitraft/command"
 	"github.com/abliu/pitraft/db"
+	"github.com/abliu/pitraft/tradedb"
 	"github.com/gorilla/mux"
 	"io/ioutil"
 	"log"
@@ -29,17 +30,26 @@ type Server struct {
 	raftServer raft.Server
 	httpServer *http.Server
 	db         *db.DB
+    tradedb    *tradedb.TradeDB
+    pairdb     *db.PairDB
 	mutex      sync.RWMutex
 }
 
 // Creates a new server.
 func New(path string, host string, port int) *Server {
+    adb := db.New()
+    atradedb := tradedb.New()
 	s := &Server{
-		host:   host,
-		port:   port,
-		path:   path,
-		db:     db.New(),
-		router: mux.NewRouter(),
+		host:       host,
+		port:       port,
+		path:       path,
+		db:         adb,
+        tradedb:    atradedb,
+		router:     mux.NewRouter(),
+        pairdb:     &db.PairDB{
+            DB:         adb,
+            TradeDB:    atradedb,
+        },
 	}
 
 	// Read existing name or generate a new one.
@@ -68,7 +78,7 @@ func (s *Server) ListenAndServe(leader string) error {
 
 	// Initialize and start Raft server.
 	transporter := raft.NewHTTPTransporter("/raft", 200*time.Millisecond)
-	s.raftServer, err = raft.NewServer(s.name, s.path, transporter, nil, s.db, "")
+	s.raftServer, err = raft.NewServer(s.name, s.path, transporter, nil, s.pairdb, "")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -112,10 +122,21 @@ func (s *Server) ListenAndServe(leader string) error {
 		Handler: s.router,
 	}
 
-	s.router.HandleFunc("/gameState", s.readHandler).Methods("GET")
-	s.router.HandleFunc("/write/{playerId}/{resource}", s.writeHandler).Methods("POST")
+    //TODO: differentiate get and post?
     s.router.HandleFunc("/addPlayer/{playerId}", s.addPlayerHandler).Methods("GET")
+    s.router.HandleFunc("/removePlayer/{playerId}", s.removePlayerHandler).Methods("GET")
+	s.router.HandleFunc("/gameState", s.readHandler).Methods("GET")
+    s.router.HandleFunc("/gameState/{playerId}", s.readPlayerHandler).Methods("GET")
+
 	s.router.HandleFunc("/join", s.joinHandler).Methods("POST")
+
+    s.router.HandleFunc("/allTrades", s.readAllTradesHandler).Methods("GET")
+    s.router.HandleFunc("/propTrade/{playerId}/{resource}/{amount}",
+        s.propTradeHandler).Methods("GET")
+    s.router.HandleFunc("/cancelTrade/{tradeId}",
+        s.cancelTradeHandler).Methods("GET")
+    s.router.HandleFunc("/acceptTrade/{tradeId}/{playerId}/{resource}",
+        s.acceptTradeHandler).Methods("GET")
 
 	log.Println("Listening at:", s.connectionString())
 
@@ -159,6 +180,16 @@ func (s *Server) joinHandler(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
+func (s *Server) readPlayerHandler(w http.ResponseWriter, req *http.Request) {
+	vars := mux.Vars(req)
+    pid, err := strconv.ParseInt(vars["playerId"], 10, 0)
+    if err != nil { //TODO: make more informative error
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
+	gameState := s.db.Get()
+    fmt.Fprintf(w, "%v", gameState[int(pid)])
+}
+
 func (s *Server) readHandler(w http.ResponseWriter, req *http.Request) {
 	//vars := mux.Vars(req)
 	gameState := s.db.Get()
@@ -169,31 +200,78 @@ func (s *Server) readHandler(w http.ResponseWriter, req *http.Request) {
     fmt.Fprintf(w, gameStateStr)
 }
 
-func (s *Server) writeHandler(w http.ResponseWriter, req *http.Request) {
+func (s *Server) readAllTradesHandler(w http.ResponseWriter, req *http.Request) {
+	//vars := mux.Vars(req)
+	trades := s.tradedb.Get()
+    tradeStr := "Outstanding trades: "
+    for id, trade := range trades {
+        tradeStr += fmt.Sprintf("%d: %v;", id, trade)
+    }
+    fmt.Fprintf(w, tradeStr)
+}
+
+func (s *Server) cancelTradeHandler(w http.ResponseWriter, req *http.Request) {
 	vars := mux.Vars(req)
 
-	// Read the new resource value from the POST body.
-	b, err := ioutil.ReadAll(req.Body)
-	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-    //TODO: fix this jankiness
-	value, err := strconv.ParseInt(string(b), 10, 0)
+	// Execute the command against the Raft server.
+    tradeId, err := strconv.ParseInt(vars["tradeId"], 10, 0)
     if err != nil { //TODO: make more informative error
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
+    _, err = s.raftServer.Do(command.NewRemoveTradeCommand(int(tradeId)))
+    if err != nil {
+       http.Error(w, err.Error(), http.StatusBadRequest)
+    }
+}
+
+func (s *Server) acceptTradeHandler(w http.ResponseWriter, req *http.Request) {
+	vars := mux.Vars(req)
+
+	// Execute the command against the Raft server.
+    tradeId, err := strconv.ParseInt(vars["tradeId"], 10, 0)
+    if err != nil { //TODO: make more informative error
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
+    pid, err := strconv.ParseInt(vars["playerId"], 10, 0)
+    if err != nil { //TODO: make more informative error
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
+    // Check if both players have enough of each resource
+    //TODO: Fix this check (notify players if not enough for trade)
+    trade := s.tradedb.GetTrade(int(tradeId))
+    askHand := s.db.GetPlayer(trade.Player)
+    fillHand := s.db.GetPlayer(int(pid))
+    amt := trade.Amount
+    if askHand[trade.Resource] >= amt && fillHand[vars["resource"]] >= amt {
+        _, err = s.raftServer.Do(command.NewFillTradeCommand(int(tradeId),
+            trade.Player, trade.Resource, int(pid), vars["resource"], amt))
+        if err != nil {
+           http.Error(w, err.Error(), http.StatusBadRequest)
+        }
+    }
+}
+
+func (s *Server) propTradeHandler(w http.ResponseWriter, req *http.Request) {
+	vars := mux.Vars(req)
 
 	// Execute the command against the Raft server.
     pid, err := strconv.ParseInt(vars["playerId"], 10, 0)
     if err != nil { //TODO: make more informative error
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
-	_, err = s.raftServer.Do(command.NewWriteCommand(int(pid),
-        vars["resource"], int(value)))
-	if err != nil {
+    amount, err := strconv.ParseInt(vars["amount"], 10, 0)
+    if err != nil { //TODO: make more informative error
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
+    // Check if player has appropriate resources
+    //TODO: Better error handling here if not enough resources
+    if s.db.GetPlayer(int(pid))[vars["resource"]] >= int(amount) {
+        _, err = s.raftServer.Do(command.NewAddTradeCommand(int(pid),
+            vars["resource"], int(amount)))
+        if err != nil {
+            http.Error(w, err.Error(), http.StatusBadRequest)
+        }
+    }
 }
 
 func (s *Server) addPlayerHandler(w http.ResponseWriter, req *http.Request) {
@@ -205,6 +283,20 @@ func (s *Server) addPlayerHandler(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
     _, err = s.raftServer.Do(command.NewPlayerCommand(int(pid), "add"))
+    if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
+}
+
+func (s *Server) removePlayerHandler(w http.ResponseWriter, req *http.Request) {
+	vars := mux.Vars(req)
+
+    //TODOs: check if player already exists, etc.
+    pid, err := strconv.ParseInt(vars["playerId"], 10, 0)
+    if err != nil { //TODO: make more informative error
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
+    _, err = s.raftServer.Do(command.NewPlayerCommand(int(pid), "remove"))
     if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	}
