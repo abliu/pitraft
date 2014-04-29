@@ -162,7 +162,11 @@ func (s *Server) joinHandler(w http.ResponseWriter, req *http.Request) {
 func (s *Server) readHandler(w http.ResponseWriter, req *http.Request) {
 	//vars := mux.Vars(req)
 	gameState := s.db.Get()
-    fmt.Fprintf(w, "Game state: %v", gameState)
+    gameStateStr := "Game state: "
+    for _, pcards := range gameState {
+        gameStateStr += fmt.Sprintf("%v;", pcards)
+    }
+    fmt.Fprintf(w, gameStateStr)
 }
 
 func (s *Server) writeHandler(w http.ResponseWriter, req *http.Request) {
