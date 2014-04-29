@@ -205,11 +205,15 @@ func (s *Server) readHandler(w http.ResponseWriter, req *http.Request) {
 func (s *Server) readAllTradesHandler(w http.ResponseWriter, req *http.Request) {
 	//vars := mux.Vars(req)
 	trades := s.tradedb.Get()
-    tradeStr := "Outstanding trades: "
-    for id, trade := range trades {
-        tradeStr += fmt.Sprintf("%d: %v;", id, trade)
+    tradesStr := make(map[string](*tradedb.Trade))
+    for id, trade := range(trades) {
+        tradesStr[fmt.Sprintf("%d", id)] = trade
     }
-    fmt.Fprintf(w, tradeStr)
+    msg, err := json.Marshal(tradesStr)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusBadRequest)
+	}
+    w.Write([]byte(msg))
 }
 
 func (s *Server) cancelTradeHandler(w http.ResponseWriter, req *http.Request) {
