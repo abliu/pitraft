@@ -3,17 +3,8 @@ package main
 import (
   "flag"
   "fmt"
-//  "github.com/goraft/raft"
-//  "github.com/abliu/pitraft/pitServer"
-//  "github.com/abliu/pitraft/player"
-//  "github.com/abliu/pitraft/command"
-//  "github.com/abliu/pitraft/server"
   "os"
-//  "io"
-//  "net"
   "net/http"
-//  "log"
-//  "encoding/gob"
   "strings"
   "encoding/json"
   "math/rand"
@@ -23,7 +14,7 @@ var wrUrl string
 var rdUrl string
 
 func init() {
-  flag.StringVar(&wrUrl, "u", "127.0.0.1:4002", "leaderUrl")
+  flag.StringVar(&wrUrl, "u", "127.0.0.1:4001", "leaderUrl")
   flag.Usage = func() {
     fmt.Fprintf(os.Stderr, "Usage: %s [arguments] \n", os.Args[0])
     flag.PrintDefaults()
@@ -41,21 +32,16 @@ func main() {
   resp, err := http.Get(strings.Join(tmp, "/"))
   fmt.Printf("%s::%v::%v\n\n", strings.Join(tmp, ""), *resp, err)
 
-  /*tmp = []string{wrUrl, "gameState", uuidStr}
-  resp, err = http.Get(strings.Join(tmp, "/"))
-  fmt.Printf("%s::%#v::%#v\n\n", strings.Join(tmp, ""), *resp, err)
-fmt.Printf("3\n")*/
-
   var jsonResp map[string]int
   fmt.Printf("%v::%v\n", json.NewDecoder((*resp).Body).Decode(&jsonResp), jsonResp)
-fmt.Printf("4\n")
 
   for {
     fmt.Printf("> ")
     var cmd string
     fmt.Scanf("%s", &cmd)
-    //tokens := strings.Split(cmd, " ")
     switch cmd {
+      case "help":
+        fmt.Printf("propose [resource] [amount]: propose a trade of [amount] of [resource]; returns tradeID and stats on trade proposed\ncancel [tradeID]: cancel a trade with ID [tradeID]\ngetState: get (my own) state\nview: view all live trades\n")
       case "propose":
         // propose trade (resource, amt)
         var resource string
@@ -77,7 +63,6 @@ fmt.Printf("4\n")
           fmt.Printf("Bad command %s %s %s::%s\n", cmd, resource, amount, err)
           continue
         }
-        //json.Unmarshal(p, &tradeID)
         fmt.Printf("tradeID::%s::(%s, %s)\n", p, resource, amount)
       case "cancel":
         // cancel trade with given ID
@@ -110,8 +95,14 @@ fmt.Printf("4\n")
           fmt.Printf("Bad command::%s\n", err)
           continue
         } else {
-          json.NewDecoder((*resp).Body).Decode(&jsonResp)
-          fmt.Printf("%v\n", jsonResp)
+          b := (*resp).Body
+          p := make([]byte, 1024, 1024)
+          _, err := b.Read(p)
+          if err != nil {
+            fmt.Printf("Error receiving response::%s\n", err)
+            continue
+          }
+          fmt.Printf("%s\n", p)
         }
     }
   }
