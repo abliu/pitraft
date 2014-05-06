@@ -7,6 +7,39 @@ pitraft is an implementation of the game
 [Pit](http://en.wikipedia.org/wiki/Pit_(game)) using the distributed consensus
 protocol [Raft](https://ramcloud.stanford.edu/wiki/download/attachments/11370504/raft.pdf).
 
+## Code Architecture
+
+This repository contains code for the following:
+
+1. Running a server for pitraft that implements the Raft distributed consensus
+   protocol for playing Pit.
+2. Running a client to play Pit by communicating to this server.
+3. An implementation of Paxos separate from pitraft.
+
+#### Pit Server
+
+The main file here is `main.go` in the top-level of the directory. Upon running,
+it starts a RaftServer (see [Raft's source
+code](https://github.com/goraft/raft)) and starts an HTTP Server that accepts
+certain requests, such as proposing trades. The code to start this server is
+mainly in `server/server.go`.
+
+Requests are mainly read or write requests. If the server receives a read
+request (e.g. to see the outstanding trades), it simply returns an HTTP Response
+with that information. If the server receives a write request (e.g. to propose a
+trade), it runs a Command that each server machine applies to itself through
+Raft's distributed consensus protocol. See `consensus/` for examples.
+
+#### Pit Client
+
+The main file here is `server/server.go`. Upon running, it starts a command line
+client through which the player can issue commands to read (e.g. to see the
+state of outstanding trades) and to write (e.g. to propose a new trade). Clients
+may join and leave the game at any time; they each start with a fixed number of
+resources.
+
+#### Paxos Implementation
+
 ## Running
 
 To start a game and play, do the following:
