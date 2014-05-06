@@ -18,6 +18,7 @@ const (
 	HEARTBEAT_TIME = 8 * ROUND_TRIP_TIME
 	REQUEST_RETRY_TIME = 10 * ROUND_TRIP_TIME
 	PRESIDENCY_TIME = 16 * ROUND_TRIP_TIME
+	PORT_BASE = 23456
 )
 
 // multi-Paxos states
@@ -42,8 +43,23 @@ type PaxosPeer struct {
 	lastHeartbeat time.Time
 }
 
-// Data about the Paxos protocol
+// Data about the Paxos protocol. Most of this is internal. The
+// interface that clients care about are the two channels 'requests'
+// (for input) and 'decrees' (for output). The protocol works as
+// follows:
+//
+// - A client puts a []byte in the decrees channel.
+// - A Paxos thread picks it up and tries to send it to the president
+// - It repeatedly re-tries until it sees the proposal come out the
+// output side
+// 
+// Unfortunately, we did not have time to build a goraft-compatible
+// server on top of this Paxos due to some coordination problems with
+// the interface design. Hence all we have is a test case that shows
+// achieving consensus on 10 sample values with n clients (simply run
+// 'go run paxos.go <n>' to observe this).
 type Paxos struct {
+	// GENERAL DATA
 	// A list of peers we talk do. Does not include ourself.
 	peers []PaxosPeer
 	// Info about ourself.
@@ -101,7 +117,8 @@ type Paxos struct {
 	multiPaxos int
 }
 
-// The type of a proposal number, so that we can order them properly with Compare(a,b) below.
+// The type of a proposal number, so that we can order them properly
+// with Compare(a,b) below.
 type ProposalNumber struct {
 	number int
 	peerIndex int
@@ -114,6 +131,13 @@ func Compare(n1, n2 ProposalNumber) int {
 	return d
 }
 
+// Initialize the Paxos object and start the protocol. We assume that
+// we "magically" get a list of peers with unique indices from
+// somewhere (aka a shared config).
+
+// Parameters:
+//   self: a description of the current peer (most importantly, an index)
+//   peers: an array of peers that does NOT contain self.
 func startPaxos(self Peer, peers []Peer) (p *Paxos, err error) {
 	// log any errors
 	defer (func() {
@@ -149,7 +173,8 @@ func startPaxos(self Peer, peers []Peer) (p *Paxos, err error) {
 		}
 	}
 
-	// set up the send/receive channels and ledger
+	// set up the send/receive channels, ledger, and temporary storage
+	// unfortunately Go seems not to have default struct initializers...
 	p.requests = make(chan []byte, 1)
 	p.ledger = make([][]byte, 100)
 	p.decrees = make(chan []byte, 10)
@@ -171,9 +196,22 @@ func (p *Paxos) Start() {
 	for i := range p.peers {
 		p.peers[i].lastHeartbeat = time.Now()
 	}
-	// do the computing
+	
+	// Do the computing in three separate threads.
+
+	// HandleRequests is responsible for reading request []bytes off of
+	// the appropriate channel, figuring out who's president, and
+	// passing on the requests to them.
 	go p.HandleRequests()
+	// This one is self-explanatory.
 	go p.SendHeartbeat()
+	// This thread loops through packets sent from other machines and
+	// dispatches handlers. We try to keep handlers on the main thread
+	// where possible, to avoid synchronization issues; the only place
+	// we fork from here is that the president spins up another thread
+	// to process the queue of decree requests (since we need to block
+	// until things appear in that queue). See StartNextRecord() which
+	// contains the blocking call.
 	go p.HandleMessages()
 }
 
@@ -181,6 +219,11 @@ func (p *Paxos) Start() {
 // PAXOS PRIMITIVES
 ////////////////////////////////////////////////////////////////////////////////
 
+// Variant type for the Paxos wire protocol. Whichever command this
+// is, that pointer gets set to non-nil; this is a principled and
+// type-safe way of having polymorphic commands on the wire without
+// doing crazy code-sharing declarations. The wire protocol is
+// json-based because Go has excellent facilities for using json.
 type PaxosMessage struct {
 	SenderIndex int
 	Heartbeat bool `json:",omitempty"`
@@ -192,7 +235,7 @@ type PaxosMessage struct {
 	Commit *Commit `json:",omitempty"`
 }
 
-// Create a message with the given type and data
+// Create a message with the given type and data.
 func (p *Paxos) NewPaxosMessage() *PaxosMessage {
 	pm := new(PaxosMessage)
 	pm.SenderIndex = p.self.index
@@ -205,6 +248,9 @@ type PaxosValue struct {
 	Proposal []byte
 }
 
+// Requests get turned into Record objects by the president so they
+// can carry a sequence number around with them while we're trying to
+// pass them.
 type PaxosRecord struct {
 	Seqnum int
 	Val PaxosValue
@@ -213,12 +259,9 @@ type PaxosRecord struct {
 // Create a new proposal request object, returning the message and the
 // request ID.
 func (p *Paxos) NewProposalRequest(request []byte) (*PaxosMessage, int64) {
-	rp := new(PaxosValue)
-	rp.Proposal = request
-	rp.Id = rand.Int63()
 	m := p.NewPaxosMessage()
-	m.Request = rp
-	return m, rp.Id
+	m.Request = &PaxosValue{Proposal: request, Id: rand.Int63()}
+	return m, m.Request.Id
 }
 
 // Message type: heartbeat
@@ -234,12 +277,9 @@ type Prepare struct {
 	N ProposalNumber
 }
 func (p *Paxos) NewPrepare(n ProposalNumber) *PaxosMessage {
-	//TODO set the seqnum correctly
-	pr := new(Prepare)
 	// pick a number higher than any we've seen
-	pr.N = n
 	m := p.NewPaxosMessage()
-	m.Prepare = pr
+	m.Prepare = &Prepare{N: n}
 	return m
 }
 
@@ -250,12 +290,12 @@ type Promise struct {
 	LastRecord PaxosRecord
 }
 func (p *Paxos) NewPromise(pr *Prepare) *PaxosMessage {
-	rr := new(Promise)
-	rr.N = pr.N
-	rr.LastAccepted = p.lastAccepted
-	rr.LastRecord = p.lastRecord
 	m := p.NewPaxosMessage()
-	m.Promise = rr
+	m.Promise = &Promise{
+		N: pr.N,
+		LastAccepted: p.lastAccepted,
+		LastRecord: p.lastRecord,
+	}
 	return m
 }
 
@@ -265,11 +305,11 @@ type Accept struct {
 	Record PaxosRecord
 }
 func (p *Paxos) NewAccept(pn ProposalNumber, r PaxosRecord) *PaxosMessage {
-	ar := new(Accept)
-	ar.N = pn
-	ar.Record = r
 	m := p.NewPaxosMessage()
-	m.Accept = ar
+	m.Accept = &Accept{
+		N: pn,
+		Record: r,
+	}
 	return m
 }
 
@@ -281,11 +321,12 @@ type Accepted struct {
 	// we don't need to include the value we accept; the id takes care of it
 }
 func (p *Paxos) NewAccepted(accept *Accept) *PaxosMessage {
-	ar := new(Accepted)
-	ar.N = accept.N
-	ar.Seqnum = accept.Record.Seqnum
 	m := p.NewPaxosMessage()
-	m.Accepted = ar
+	m.Accepted = &Accepted{
+		N: accept.N,
+		Seqnum: accept.Record.Seqnum,
+		Id: accept.Record.Val.Id,
+	}
 	return m
 }
 
@@ -295,8 +336,7 @@ type Commit struct {
 
 func (p *Paxos) NewCommit(r PaxosRecord) *PaxosMessage {
 	m := p.NewPaxosMessage()
-	m.Commit = new(Commit)
-	m.Commit.Record = r
+	m.Commit = &Commit{Record: r}
 	return m
 }
 
@@ -351,9 +391,11 @@ func (p *Paxos) AcceptDecree(i int, decree []byte) {
 	}
 }
 
-// Get the peer with the appropriate index
+// Get the peer with the appropriate index. Does not handle the case
+// that index == p.self.index, since we don't have a PaxosPeer for
+// self and that should usually be handled separatedly anyway.
 func (p *Paxos) GetPeer(index int) *PaxosPeer {
-	for i, _ := range p.peers {
+	for i := range p.peers {
 		if p.peers[i].info.index == index {
 			return &p.peers[i]
 		}
@@ -381,6 +423,8 @@ func (p *Paxos) HandleRequest(request []byte) {
 	// president until the request makes it into the ledger
 	for p.running {
 		pnum := p.GetPresident()
+		// Are we the president? If so, handle the request directly rather
+		// than going over UDP.
 		if pnum == p.self.index {
 			p.HandleProposalRequest(nil, pr.Request)
 		} else {
@@ -433,7 +477,8 @@ func (p *Paxos) HandleMessages() {
 		default:
 			p.log.Println("Unknown type; ignoring")
 		case message.Heartbeat:
-			p.log.Println("Heartbeat")
+			// There are n^2 of these messages, so let's not log
+			//p.log.Println("Heartbeat")
 			sender.lastHeartbeat = time.Now()
 		case message.Request != nil:
 			p.log.Println("Request")
@@ -478,6 +523,10 @@ func (p *Paxos) HandlePrepare(sender *PaxosPeer, prepare *Prepare) {
 		p.otherLastAccepted.number = -1
 		p.receivedPromise = nil
 		p.numPromises = 0
+		// also stop our attempt to do multi-paxos, someone else is taking
+		// over (we'll take it back if they fail because we'll end up
+		// being president)
+		p.multiPaxos = STOPPED
 	}
 	// Respond to this prepare request, if we can. Note that a
 	// promise(n) doesn't preclude responding to other proposals with
@@ -496,6 +545,8 @@ func (p *Paxos) HandlePrepare(sender *PaxosPeer, prepare *Prepare) {
 	}
 }
 
+// Count the number of promises we collect, and move forwards once a
+// quorum is reacherd.
 func (p *Paxos) HandlePromise(sender *PaxosPeer, promise *Promise) {
 	if promise.N == p.currentProposal && !p.receivedPromise[sender.info.index] {
 		p.log.Printf("Received a correct promise from %d...", sender.info.index)
@@ -515,7 +566,7 @@ func (p *Paxos) HandlePromise(sender *PaxosPeer, promise *Promise) {
 	}
 }
 
-// become the distinguished proposer.
+// Try to become the distinguished proposer.
 func (p *Paxos) StartMultiPaxos() {
 	if p.multiPaxos != STOPPED {
 		p.log.Println("already in multi-Paxos")
@@ -529,12 +580,13 @@ func (p *Paxos) StartMultiPaxos() {
 	p.receivedPromise = make(map[int]bool)
 	// prepare all our peers so we can pick any quorum later
 	m := p.NewPrepare(p.currentProposal)
-	for i, _ := range p.peers {
+	for i := range p.peers {
 		p.SendMessage(m, &p.peers[i])
 	}
 }
 
-// start issuing the proposals that are in our queue
+// We've collected enough promises for a quorum. Now we can Start
+// issuing the proposals that are in our queue.
 func (p *Paxos) RunMultiPaxos() {
 	if p.multiPaxos == RUNNING {
 		p.log.Println("WARNING: already doing multi-Paxos")
@@ -547,19 +599,19 @@ func (p *Paxos) RunMultiPaxos() {
 		p.log.Printf("starting with the previous record from %v", p.otherLastAccepted)
 		p.StartRecord(p.otherLastRecord)
 	} else {
+		// otherwise, start pulling from our internal proposals channel
 		go p.StartNextRecord()
 	}
 }
 
 func (p *Paxos) StartRecord(r PaxosRecord) {
-	//TODO zero all the relevant variables
 	p.numAccepted = 0
 	p.acceptedRecord = make(map[int]bool)
 	p.currentRecord = r
-	//accept the thing ourselves
+	// Accept the thing ourselves
 	p.AcceptRecord(p.currentProposal, r)
 	m := p.NewAccept(p.currentProposal, r)
-	//send it out to all our guys
+	// Send it out to all our guys
 	for i := range p.peers {
 		go p.SendMessage(m, &p.peers[i])
 	}
@@ -567,6 +619,8 @@ func (p *Paxos) StartRecord(r PaxosRecord) {
 
 func (p *Paxos) StartNextRecord() {
 	p.log.Println("Starting next record")
+	// we have to zero things now in case we get more (extraneous)
+	// Accept messages back for previous records
 	p.numAccepted = 0
 	p.acceptedRecord = make(map[int]bool)
 	oldSeqnum := p.currentRecord.Seqnum
@@ -580,12 +634,13 @@ func (p *Paxos) StartNextRecord() {
 	}
 }
 
+// The local part of accepting the record
 func (p *Paxos) AcceptRecord(n ProposalNumber, r PaxosRecord) {
 	p.lastAccepted = n
 	p.lastRecord = r
-	//TODO assertions and stuff
 }
 
+// Handle a request to accept the record.
 func (p *Paxos) HandleAccept(sender *PaxosPeer, accept *Accept) {
 	cmp := Compare(accept.N, p.lastPrepared)
 	if (cmp < 0) {
@@ -600,6 +655,7 @@ func (p *Paxos) HandleAccept(sender *PaxosPeer, accept *Accept) {
 	p.SendMessage(p.NewAccepted(accept), sender)
 }
 
+// Handle a response that a peer has accepted the record.
 func (p *Paxos) HandleAccepted(sender *PaxosPeer, accepted *Accepted) {
 	index := sender.info.index
 	p.log.Printf("Got acceptance of (%d, %d) #%d from %d",
@@ -614,12 +670,15 @@ func (p *Paxos) HandleAccepted(sender *PaxosPeer, accepted *Accepted) {
 			p.numAccepted += 1
 		}
 		if p.numAccepted == p.quorumSize {
+			// Accepted by a majority. Inform the learners!
 			p.SendCommitRecord(p.currentRecord)
 			go p.StartNextRecord()
 		}
 	}
 }
 
+// Send "commit" messages to learners (aka everyone). Also commit it
+// to our own learner.
 func (p *Paxos) SendCommitRecord(r PaxosRecord) {
 	p.CommitRecord(r)
 	m := p.NewCommit(r)
@@ -628,27 +687,39 @@ func (p *Paxos) SendCommitRecord(r PaxosRecord) {
 	}
 }
 
+// Handle receiving a commit message
 func (p *Paxos) HandleCommit(sender *PaxosPeer, c *Commit) {
 	p.CommitRecord(c.Record)
 }
 
+// The local side of committing.
 func (p *Paxos) CommitRecord(r PaxosRecord) {
 	p.AcceptDecree(r.Seqnum, r.Val.Proposal)
 	p.acceptedProposals[r.Val.Id] = true
-	p.log.Printf("Decree %d has passed", r.Val.Id)
+	p.log.Printf("Decree %d committed", r.Val.Id)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // main
 ////////////////////////////////////////////////////////////////////////////////
 
+// A test case; coordinate on the values 1...10 requested from random peers.
 func DoClient(ps []*Paxos) {
 	vals := make([]byte, 10)
 	for i := range vals {
 		j := byte(rand.Intn(len(ps)))
-		ps[j].requests <- []byte {byte(i), j, 2, 3}
+		ps[j].requests <- []byte {byte(i), j}
 		time.Sleep(1 * time.Second)
 	}
+	// Print out everyone's ledger; they should look the same and have
+	// the numbers 1...10 in the first byte and random numbers in the
+	// second.
+	//
+	// Note: we're not actually guaranteed that all the listeners have
+	// the same values at this point (the Commit packets could have been
+	// dropped, e.g.). So this is actually a test of stronger conditions
+	// than just Paxos. On a local machine, things are fast enough that
+	// I've never observed it not working.
 	for i := range vals {
 		for _, p := range ps {
 			fmt.Printf("%v", p.ledger[i])
@@ -664,6 +735,7 @@ func main() {
 	if len(args) < 1 {
 		os.Exit(1)
 	}
+	// how many peers?
 	numPeers, err := strconv.ParseInt(args[0], 0, 32)
 	if err != nil {
 		fmt.Println(err)
@@ -671,7 +743,8 @@ func main() {
 	}
 	fmt.Printf("Paxos with %d instances\n", numPeers)
 
-	portbase := 23456
+	// peer i will listen on portbase+i
+	portbase := PORT_BASE
 
 	peers := make([]Peer, numPeers)
 	for i := range peers {
@@ -680,9 +753,10 @@ func main() {
 	}
 
 	insts := make([]*Paxos, numPeers)
-	
+
 	for i := range peers {
 		self := peers[i]
+		// make the list of peers for an instance by excising self
 		others := make([]Peer, numPeers-1)
 		copy(others[:i], peers[:i])
 		copy(others[i:], peers[i+1:])
@@ -698,6 +772,9 @@ func main() {
 	for _, p := range insts {
 		p.Start()
 	}
+
+	// run the test
 	go DoClient(insts)
+	// the test takes care of exiting, so just sleep for a while
 	time.Sleep(time.Second * 300)
 }
