@@ -1,3 +1,5 @@
+// Adapted from raftd: https://github.com/goraft/raftd.
+
 package main
 
 import (

@@ -1,3 +1,5 @@
+// Adapted from raftd: https://github.com/goraft/raftd.
+
 package server
 
 import (
@@ -193,7 +195,6 @@ func (s *Server) readPlayerHandler(w http.ResponseWriter, req *http.Request) {
 }
 
 func (s *Server) readHandler(w http.ResponseWriter, req *http.Request) {
-	//vars := mux.Vars(req)
 	gameState := s.db.Get()
     gameStateStr := "Game state: "
     for _, pcards := range gameState {
@@ -203,7 +204,6 @@ func (s *Server) readHandler(w http.ResponseWriter, req *http.Request) {
 }
 
 func (s *Server) readAllTradesHandler(w http.ResponseWriter, req *http.Request) {
-	//vars := mux.Vars(req)
 	trades := s.tradedb.Get()
     tradesStr := make(map[string](*tradedb.Trade))
     for id, trade := range(trades) {
