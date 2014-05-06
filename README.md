@@ -33,9 +33,9 @@ To start a game and play, do the following:
    specified in -p in #3.
 6. When you are playing on the client machine, you will be playing through a
    command line shell. You can enter 
-   ```propose [resource] [amount]```: propose a trade of [amount] of [resource]; returns tradeID and stats on trade proposed
-   ```cancel [tradeID]```: cancel a trade with ID [tradeID]
-   ```getState```: get (my own) state
+   ```propose [resource] [amount]```: propose a trade of [amount] of [resource]; returns tradeID and stats on trade proposed;
+   ```cancel [tradeID]```: cancel a trade with ID [tradeID];
+   ```getState```: get (my own) state;
    ```view```: view all live trades
 
 ## Caveats
