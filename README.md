@@ -16,18 +16,18 @@ To start a game and play, do the following:
 3. To start running a leader machine for the distributed consensus algorithm,
    first make a directory in which you want to store log files. Then, from
    command line, execute:
-   ```cd <pitraft_repo_folder>
+   ```cd <pitraft_repo_folder>;
       go run main.go -p 4001 <your_log_file_folder>```
 4. To start running a follower machine for the distributed consensus algorithm,
    first make a directory in which you want to store log files. Then, from
    command line, execute:
-   ```cd <pitraft_repo_folder>
+   ```cd <pitraft_repo_folder>;
       go run main.go -p <desired_port> -join <host_address:port>
       <your_log_file_folder>```
    where `host_address:port` denotes the leader's address and port number,
    specified in -p in #3.
 5. To start running a client machine that plays Pit, execute:
-   ```cd <pitraft_repo_folder>/client
+   ```cd <pitraft_repo_folder>/client;
       go run client.go -u <host_address:port>```
    where `host_address:port` again denotes the leader's address and port number,
    specified in -p in #3.
